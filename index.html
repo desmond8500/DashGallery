@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Galerie de dossier</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #181b22; --line: #2a2f3a;
+    --text: #e8eaf0; --muted: #8b93a7; --accent: #4f8cff; --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header {
+    position: sticky; top: 0; z-index: 10; background: var(--panel);
+    border-bottom: 1px solid var(--line); padding: 12px 16px;
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  }
+  h1 { font-size: 18px; margin: 0 12px 0 0; }
+  button, select, input[type=search] {
+    background: #222733; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px; font-size: 14px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { background: #3a1d22; border-color: #7a2d38; color: #ff8b95; }
+  button.danger:hover:not(:disabled) { border-color: var(--danger); }
+  input[type=search] { cursor: text; min-width: 180px; }
+  .spacer { flex: 1; }
+  .info { padding: 10px 16px; color: var(--muted); font-size: 13px; }
+  .error { color: var(--danger); padding: 10px 16px; }
+  .empty { text-align: center; padding: 80px 20px; color: var(--muted); }
+  .grid {
+    display: grid; gap: 10px; padding: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+  .grid.withbar { padding-bottom: 100px; }
+  .card {
+    position: relative; aspect-ratio: 1; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden; cursor: pointer;
+    user-select: none;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+  .card img, .card video { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card .name {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 18px 8px 6px;
+    font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    background: linear-gradient(transparent, rgba(0,0,0,.8));
+  }
+  .card .tags { color: #9db4ff; font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+  .badge, .cat {
+    position: absolute; top: 8px; background: rgba(0,0,0,.65);
+    border-radius: 6px; padding: 2px 8px; font-size: 12px;
+  }
+  .badge { right: 8px; }
+  .cat { left: 8px; background: rgba(79,140,255,.85); max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card.selectable .cat { left: 40px; max-width: 45%; }
+  .check {
+    position: absolute; top: 8px; left: 8px; width: 24px; height: 24px; border-radius: 50%;
+    border: 2px solid #fff; background: rgba(0,0,0,.5); color: #fff; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .check.on { background: var(--accent); border-color: var(--accent); }
+
+  /* Barre d'actions groupées */
+  .bulkbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; background: var(--panel);
+    border-top: 1px solid var(--line); padding: 12px 16px;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  }
+  .bulkbar .hint { color: var(--muted); font-size: 12px; }
+
+  /* Visionneuse + panneau d'édition */
+  .viewer { position: fixed; inset: 0; background: rgba(0,0,0,.92); z-index: 100; display: flex; }
+  .stage {
+    flex: 1; min-width: 0; padding: 16px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px;
+  }
+  .stage img, .stage video { max-width: 100%; max-height: calc(100vh - 90px); object-fit: contain; border-radius: 6px; }
+  .caption { color: var(--muted); font-size: 13px; text-align: center; }
+  .nav, .close {
+    position: absolute; background: rgba(255,255,255,.1); border: none;
+    color: #fff; font-size: 28px; width: 48px; height: 48px; border-radius: 50%;
+  }
+  .nav { top: 50%; transform: translateY(-50%); }
+  .nav.prev { left: 16px; }
+  .nav.next { right: 356px; }
+  .close { top: 16px; left: 16px; font-size: 22px; }
+  .panel {
+    width: 340px; flex-shrink: 0; background: var(--panel); border-left: 1px solid var(--line);
+    padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+  }
+  .panel h2, .dialog h2 { margin: 0 0 4px; font-size: 16px; }
+  .panel label, .dialog label { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .panel input, .panel textarea, .dialog input[type=text] {
+    width: 100%; background: #222733; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 14px;
+  }
+  .panel input:focus, .panel textarea:focus, .dialog input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .panel textarea { resize: vertical; }
+  .panel .row { display: flex; gap: 6px; align-items: center; }
+  .panel .ext { color: var(--muted); font-size: 14px; }
+  .meta { margin: 0; font-size: 12px; color: var(--muted); word-break: break-all; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .warn { color: #ffcb6b; font-size: 12px; }
+  .err { color: var(--danger); font-size: 13px; }
+  .actions { display: flex; gap: 8px; margin-top: 14px; }
+  .actions button { flex: 1; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    background: #273049; border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 2px;
+  }
+  .chip button { border: none; background: none; color: var(--muted); padding: 0 6px; font-size: 14px; }
+  .chip button:hover { color: var(--danger); }
+
+  /* Fenêtre d'action groupée */
+  .modal {
+    position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.7);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .dialog {
+    width: 420px; max-width: 100%; max-height: 90vh; overflow-y: auto; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 12px; padding: 20px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .dialog input[type=checkbox] { width: auto; margin-right: 6px; }
+  .checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .check-row { display: flex; align-items: center; margin: 0 !important; font-size: 13px !important; color: var(--text) !important; }
+
+  @media (max-width: 800px) {
+    .viewer { flex-direction: column; }
+    .panel { width: auto; max-height: 48vh; border-left: none; border-top: 1px solid var(--line); }
+    .stage img, .stage video { max-height: 36vh; }
+    .nav { top: 22%; }
+    .nav.next { right: 16px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>📁 Galerie</h1>
+    <button class="primary" @click="openFolder">Choisir un dossier</button>
+    <button v-if="hasRoot" :disabled="loading || working" @click="reindex">Réindexer</button>
+    <button v-if="items.length" @click="downloadIndex">Télécharger l'index</button>
+    <button v-if="items.length" :class="{active: selectMode}" @click="toggleSelectMode">
+      {{ selectMode ? 'Terminer la sélection' : 'Sélectionner' }}
+    </button>
+    <span class="spacer"></span>
+    <template v-if="items.length">
+      <button :class="{active: filter==='all'}" @click="filter='all'">Tous ({{ items.length }})</button>
+      <button :class="{active: filter==='image'}" @click="filter='image'">Images ({{ counts.image }})</button>
+      <button :class="{active: filter==='video'}" @click="filter='video'">Vidéos ({{ counts.video }})</button>
+      <select v-model="catFilter">
+        <option value="">Toutes les catégories</option>
+        <option value="__none__">Sans catégorie</option>
+        <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
+      </select>
+      <select v-model="tagFilter">
+        <option value="">Tous les tags</option>
+        <option v-for="t in allTags" :key="t" :value="t">#{{ t }}</option>
+      </select>
+      <select v-model="folderFilter">
+        <option value="">Tous les dossiers</option>
+        <option v-for="f in folders" :key="f" :value="f">{{ f }}</option>
+      </select>
+      <input type="search" v-model="search" placeholder="Rechercher...">
+      <select v-model="sort">
+        <option value="name">Nom</option>
+        <option value="date">Date (récent)</option>
+        <option value="size">Taille (grand)</option>
+      </select>
+    </template>
+  </header>
+
+  <input ref="fallback" type="file" webkitdirectory multiple hidden @change="onFallback">
+
+  <div v-if="error && !current" class="error">⚠ {{ error }}</div>
+  <div v-if="status" class="info">{{ status }}</div>
+  <div v-if="loading" class="info">Indexation en cours...</div>
+
+  <div v-if="!items.length && !loading" class="empty">
+    <p style="font-size:42px;margin:0">🖼️ 🎬</p>
+    <p>Cliquez sur « Choisir un dossier » pour indexer vos images et vidéos.</p>
+    <p style="font-size:13px">Chrome / Edge recommandés : l'index <code>index.json</code> (avec descriptions, catégories et tags) est écrit dans le dossier, et le renommage, le déplacement et la suppression de fichiers sont possibles.</p>
+  </div>
+
+  <div class="grid" :class="{withbar: selectMode}" v-if="filtered.length">
+    <media-thumb
+      v-for="(it, i) in filtered" :key="it.path" :item="it"
+      :selectable="selectMode" :selected="selected.has(it.path)"
+      @open="onCard(it, i, $event)"></media-thumb>
+  </div>
+  <div v-else-if="items.length" class="empty">Aucun résultat.</div>
+
+  <!-- Barre d'actions groupées -->
+  <div v-if="selectMode" class="bulkbar">
+    <strong v-if="working">{{ progressText }}</strong>
+    <template v-else>
+      <strong>{{ selectedItems.length }} sélectionné(s)</strong>
+      <span v-if="hiddenSelected" class="hint">({{ hiddenSelected }} hors filtre)</span>
+    </template>
+    <button :disabled="working || !filtered.length" @click="selectAllVisible">Tout sélectionner ({{ filtered.length }})</button>
+    <button :disabled="working || !selectedItems.length" @click="clearSelection">Aucun</button>
+    <span class="spacer"></span>
+    <button :disabled="working || !selectedItems.length" @click="openBulk('category')">Catégorie</button>
+    <button :disabled="working || !selectedItems.length" @click="openBulk('tags')">Tags</button>
+    <button :disabled="working || !selectedItems.length || !hasRoot" @click="openBulk('move')" :title="hasRoot ? '' : 'Chrome / Edge uniquement'">Déplacer</button>
+    <button class="danger" :disabled="working || !selectedItems.length || !hasRoot" @click="bulkDelete" :title="hasRoot ? '' : 'Chrome / Edge uniquement'">Supprimer</button>
+  </div>
+
+  <!-- Fenêtre d'action groupée -->
+  <div v-if="bulk.open" class="modal" @click.self="closeBulk">
+    <div class="dialog">
+      <h2>{{ bulkTitle }}</h2>
+      <p class="meta">{{ selectedItems.length }} fichier(s) concerné(s)</p>
+
+      <template v-if="bulk.kind === 'category'">
+        <label>Nouvelle catégorie</label>
+        <input type="text" v-model="bulk.category" list="bulk-cat-list" placeholder="ex. Vacances" :disabled="bulk.clearCategory" maxlength="80">
+        <datalist id="bulk-cat-list"><option v-for="c in categories" :key="c" :value="c"></option></datalist>
+        <label class="check-row"><input type="checkbox" v-model="bulk.clearCategory"> Effacer la catégorie des fichiers sélectionnés</label>
+      </template>
+
+      <template v-else-if="bulk.kind === 'tags'">
+        <label>Ajouter ces tags</label>
+        <div class="chips">
+          <span v-for="t in bulk.addTags" :key="t" class="chip">#{{ t }}<button type="button" @click="removeBulkTag(t)">×</button></span>
+        </div>
+        <input type="text" v-model="bulk.tagInput" list="bulk-tag-list" placeholder="Tag puis Entrée ou virgule" @keydown="onBulkTagKey" @blur="addBulkTag">
+        <datalist id="bulk-tag-list"><option v-for="t in allTags" :key="t" :value="t"></option></datalist>
+        <label>Retirer ces tags (présents dans la sélection)</label>
+        <div v-if="selectionTags.length" class="checks">
+          <label v-for="t in selectionTags" :key="t" class="check-row"><input type="checkbox" :value="t" v-model="bulk.removeTags"> #{{ t }}</label>
+        </div>
+        <small v-else class="hint">Aucun tag dans la sélection.</small>
+      </template>
+
+      <template v-else-if="bulk.kind === 'move'">
+        <label>Dossier de destination</label>
+        <input type="text" v-model="bulk.folder" list="bulk-folder-list" placeholder="(racine) ou ex. vacances/2026">
+        <datalist id="bulk-folder-list"><option v-for="f in folders" :key="f" :value="f"></option></datalist>
+        <small class="hint">Laissez vide pour la racine du dossier. Les dossiers manquants sont créés. En cas de nom déjà pris, le fichier devient « nom (1).ext ».</small>
+      </template>
+
+      <div v-if="bulk.error" class="err">⚠ {{ bulk.error }}</div>
+      <div class="actions">
+        <button :disabled="bulk.busy" @click="closeBulk">Annuler</button>
+        <button class="primary" :disabled="bulk.busy" @click="applyBulk">{{ bulk.busy ? bulk.progress : 'Appliquer' }}</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Visionneuse -->
+  <div v-if="current" class="viewer">
+    <button class="close" title="Fermer (Échap)" @click="close">✕</button>
+    <button class="nav prev" title="Précédent (←)" @click="move(-1)">‹</button>
+
+    <div class="stage" @click.self="close">
+      <img v-if="current.type==='image' && viewerUrl" :src="viewerUrl" :alt="current.name">
+      <video v-else-if="current.type==='video' && viewerUrl" :src="viewerUrl" controls autoplay></video>
+      <div class="caption">{{ viewerIndex + 1 }} / {{ filtered.length }}</div>
+    </div>
+
+    <button class="nav next" title="Suivant (→)" @click="move(1)">›</button>
+
+    <aside class="panel">
+      <h2>Informations</h2>
+      <p class="meta">{{ current.type === 'image' ? '🖼️ Image' : '🎬 Vidéo' }} · {{ fmtSize(current.size) }} · {{ fmtDate(current.modified) }}</p>
+      <p class="meta">{{ current.path }}</p>
+
+      <label>Nom du fichier</label>
+      <div class="row">
+        <input v-model="form.base" :disabled="!hasRoot || busy" maxlength="200">
+        <span class="ext">{{ extOf(current.name) }}</span>
+      </div>
+
+      <label>Dossier</label>
+      <input v-model="form.folder" list="folder-list" :disabled="!hasRoot || busy" placeholder="(racine)">
+      <datalist id="folder-list"><option v-for="f in folders" :key="f" :value="f"></option></datalist>
+      <small v-if="hasRoot" class="hint">Changez le dossier pour déplacer le fichier (créé s'il n'existe pas).</small>
+      <small v-else class="hint">Renommage, déplacement et suppression : disponibles uniquement avec Chrome / Edge.</small>
+
+      <label>Description</label>
+      <textarea v-model="form.description" rows="4" placeholder="Décrivez ce fichier..."></textarea>
+
+      <label>Catégorie</label>
+      <input v-model="form.category" list="cat-list" placeholder="ex. Vacances" maxlength="80">
+      <datalist id="cat-list"><option v-for="c in categories" :key="c" :value="c"></option></datalist>
+
+      <label>Tags</label>
+      <div class="chips">
+        <span v-for="t in form.tags" :key="t" class="chip">#{{ t }}<button type="button" title="Retirer" @click="removeTag(t)">×</button></span>
+      </div>
+      <input v-model="form.tagInput" list="tag-list" placeholder="Ajouter un tag (Entrée ou virgule)" @keydown="onTagKey" @blur="addTag">
+      <datalist id="tag-list"><option v-for="t in allTags" :key="t" :value="t"></option></datalist>
+
+      <div class="actions">
+        <button class="primary" :disabled="busy || !formDirty" @click="save">{{ busy ? '...' : 'Enregistrer' }}</button>
+        <button class="danger" :disabled="busy || !hasRoot" @click="remove">Supprimer</button>
+      </div>
+      <small v-if="formDirty" class="warn">● Modifications non enregistrées</small>
+      <div v-if="error" class="err">⚠ {{ error }}</div>
+    </aside>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, reactive, computed, watch, onMounted, onBeforeUnmount } = Vue;
+
+/* ---------- Utilitaires ---------- */
+const IMG = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'avif', 'bmp', 'svg'];
+const VID = ['mp4', 'webm', 'ogv', 'mov', 'm4v', 'mkv'];
+
+function typeOf(name) {
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0) return null;
+  const ext = name.slice(dot + 1).toLowerCase();
+  if (IMG.includes(ext)) return 'image';
+  if (VID.includes(ext)) return 'video';
+  return null;
+}
+function extOf(name) { const d = name.lastIndexOf('.'); return d > 0 ? name.slice(d) : ''; }
+function baseOf(name) { const d = name.lastIndexOf('.'); return d > 0 ? name.slice(0, d) : name; }
+function folderOf(path) { const i = path.lastIndexOf('/'); return i === -1 ? '' : path.slice(0, i); }
+function joinPath(folder, name) { return folder ? folder + '/' + name : name; }
+function normalizeFolder(s) {
+  return (s || '').replace(/\\/g, '/').split('/').map(x => x.trim()).filter(Boolean).join('/');
+}
+function validateFolder(folder) {
+  for (const seg of folder.split('/').filter(Boolean)) {
+    if (seg === '.' || seg === '..') return 'Nom de dossier invalide.';
+    if (seg.startsWith('.')) return 'Un dossier ne peut pas commencer par un point.';
+    if (/[:*?"<>|]/.test(seg)) return 'Caractères interdits dans un dossier : : * ? " < > |';
+  }
+  return '';
+}
+
+function fmtSize(b) {
+  if (b < 1024) return b + ' o';
+  if (b < 1024 ** 2) return (b / 1024).toFixed(1) + ' Ko';
+  if (b < 1024 ** 3) return (b / 1024 ** 2).toFixed(1) + ' Mo';
+  return (b / 1024 ** 3).toFixed(2) + ' Go';
+}
+function fmtDate(ts) { return new Date(ts).toLocaleDateString('fr-FR'); }
+
+// Garantit la présence des champs de métadonnées (anciens index.json inclus)
+function normalize(i) {
+  return {
+    ...i,
+    description: typeof i.description === 'string' ? i.description : '',
+    category: typeof i.category === 'string' ? i.category : '',
+    tags: Array.isArray(i.tags) ? [...i.tags] : [],
+  };
+}
+
+/* ---------- Source des fichiers (hors état réactif) ---------- */
+// root  : dossier choisi via File System Access API (Chrome/Edge)
+// files : Map chemin -> File (repli <input webkitdirectory> : Firefox/Safari)
+let source = { root: null, files: null };
+
+async function getDirByPath(folder, create = false) {
+  let dir = source.root;
+  for (const seg of folder.split('/').filter(Boolean)) {
+    dir = await dir.getDirectoryHandle(seg, { create });
+  }
+  return dir;
+}
+function getParentDir(path) { return getDirByPath(folderOf(path)); }
+
+async function getFile(item) {
+  if (source.files) return source.files.get(item.path);
+  const dir = await getParentDir(item.path);
+  const fh = await dir.getFileHandle(item.name);
+  return fh.getFile();
+}
+
+async function scanDir(dir, prefix = '', out = []) {
+  for await (const [name, handle] of dir.entries()) {
+    if (name.startsWith('.')) continue;
+    if (handle.kind === 'directory') {
+      await scanDir(handle, prefix + name + '/', out);
+    } else {
+      const type = typeOf(name);
+      if (!type) continue;
+      const f = await handle.getFile();
+      out.push({
+        name, path: prefix + name, type, size: f.size, modified: f.lastModified, mime: f.type,
+        description: '', category: '', tags: [],
+      });
+    }
+  }
+  return out;
+}
+
+// Renomme et/ou déplace un fichier sur le disque.
+// move() si le navigateur le permet, sinon copie dans la destination puis suppression de la source.
+async function relocateOnDisk(item, destFolder, newName) {
+  const srcFolder = folderOf(item.path);
+  const sameDir = srcFolder === destFolder;
+  const srcDir = await getDirByPath(srcFolder);
+  const destDir = sameDir ? srcDir : await getDirByPath(destFolder, true);
+
+  let exists = false;
+  try { await destDir.getFileHandle(newName); exists = true; } catch (e) { /* n'existe pas */ }
+  const sameFile = sameDir && newName.toLowerCase() === item.name.toLowerCase();
+  if (exists && !sameFile) throw new Error('Un fichier porte déjà ce nom dans le dossier de destination.');
+
+  const handle = await srcDir.getFileHandle(item.name);
+  if (typeof handle.move === 'function') {
+    try {
+      if (sameDir) await handle.move(newName);
+      else await handle.move(destDir, newName);
+      return;
+    } catch (e) { /* repli ci-dessous */ }
+  }
+
+  // Repli : copie puis suppression de l'original
+  const src = await handle.getFile();
+  const nh = await destDir.getFileHandle(newName, { create: true });
+  try {
+    const w = await nh.createWritable();
+    await src.stream().pipeTo(w);
+  } catch (e) {
+    try { await destDir.removeEntry(newName); } catch (e2) { /* ignore */ }
+    throw e;
+  }
+  await srcDir.removeEntry(item.name);
+}
+
+/* ---------- Composant vignette (chargement paresseux) ---------- */
+const MediaThumb = {
+  props: ['item', 'selectable', 'selected'],
+  emits: ['open'],
+  setup(props) {
+    const el = ref(null);
+    const url = ref(null);
+    const tagLine = computed(() => (props.item.tags || []).map(t => '#' + t).join(' '));
+    const tip = computed(() =>
+      props.item.description ? props.item.path + '\n' + props.item.description : props.item.path
+    );
+    let obs;
+    onMounted(() => {
+      obs = new IntersectionObserver(async ([entry]) => {
+        if (!entry.isIntersecting) return;
+        obs.disconnect();
+        try {
+          const f = await getFile(props.item);
+          url.value = URL.createObjectURL(f);
+        } catch (e) { /* fichier déplacé ou supprimé */ }
+      }, { rootMargin: '300px' });
+      obs.observe(el.value);
+    });
+    onBeforeUnmount(() => {
+      if (obs) obs.disconnect();
+      if (url.value) URL.revokeObjectURL(url.value);
+    });
+    return { el, url, tagLine, tip };
+  },
+  template: `
+    <div class="card" :class="{ selectable: selectable, selected: selected }" ref="el" @click="$emit('open', $event)" :title="tip">
+      <img v-if="url && item.type==='image'" :src="url" :alt="item.name">
+      <video v-else-if="url" :src="url + '#t=0.5'" preload="metadata" muted></video>
+      <span v-if="selectable" class="check" :class="{ on: selected }">{{ selected ? '✓' : '' }}</span>
+      <span v-if="item.category" class="cat">{{ item.category }}</span>
+      <span v-if="item.type==='video'" class="badge">▶ vidéo</span>
+      <div class="name">
+        {{ item.name }}
+        <div v-if="tagLine" class="tags">{{ tagLine }}</div>
+      </div>
+    </div>`
+};
+
+/* ---------- Application ---------- */
+createApp({
+  components: { MediaThumb },
+  setup() {
+    const items = ref([]);
+    const filter = ref('all');
+    const catFilter = ref('');
+    const tagFilter = ref('');
+    const folderFilter = ref('');
+    const search = ref('');
+    const sort = ref('name');
+    const loading = ref(false);
+    const busy = ref(false);
+    const working = ref(false);
+    const progressText = ref('');
+    const error = ref('');
+    const status = ref('');
+    const folderName = ref('');
+    const hasRoot = ref(false);
+    const fallback = ref(null);
+    const viewerIndex = ref(null);
+    const viewerUrl = ref(null);
+    const form = reactive({ base: '', folder: '', description: '', category: '', tags: [], tagInput: '' });
+
+    const selectMode = ref(false);
+    const selected = ref(new Set());
+    let lastIndex = null;
+    const bulk = reactive({
+      open: false, kind: '', busy: false, progress: '', error: '',
+      category: '', clearCategory: false,
+      addTags: [], tagInput: '', removeTags: [],
+      folder: '',
+    });
+
+    const counts = computed(() => ({
+      image: items.value.filter(i => i.type === 'image').length,
+      video: items.value.filter(i => i.type === 'video').length,
+    }));
+
+    const categories = computed(() =>
+      [...new Set(items.value.map(i => i.category).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b, 'fr'))
+    );
+    const allTags = computed(() =>
+      [...new Set(items.value.flatMap(i => i.tags || []))]
+        .sort((a, b) => a.localeCompare(b, 'fr'))
+    );
+    // Tous les dossiers (et leurs parents) présents dans l'index
+    const folders = computed(() => {
+      const set = new Set();
+      for (const i of items.value) {
+        const parts = folderOf(i.path).split('/').filter(Boolean);
+        for (let k = 1; k <= parts.length; k++) set.add(parts.slice(0, k).join('/'));
+      }
+      return [...set].sort((a, b) => a.localeCompare(b, 'fr'));
+    });
+
+    const filtered = computed(() => {
+      const q = search.value.trim().toLowerCase();
+      const list = items.value.filter(i => {
+        if (filter.value !== 'all' && i.type !== filter.value) return false;
+        if (catFilter.value === '__none__' && i.category) return false;
+        if (catFilter.value && catFilter.value !== '__none__' && i.category !== catFilter.value) return false;
+        if (tagFilter.value && !(i.tags || []).includes(tagFilter.value)) return false;
+        if (folderFilter.value) {
+          const f = folderOf(i.path);
+          if (f !== folderFilter.value && !f.startsWith(folderFilter.value + '/')) return false;
+        }
+        if (q) {
+          const hay = [i.path, i.description, i.category, (i.tags || []).join(' ')].join(' ').toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+      const by = {
+        name: (a, b) => a.path.localeCompare(b.path, 'fr', { numeric: true }),
+        date: (a, b) => b.modified - a.modified,
+        size: (a, b) => b.size - a.size,
+      }[sort.value];
+      return [...list].sort(by);
+    });
+
+    const current = computed(() =>
+      viewerIndex.value === null ? null : filtered.value[viewerIndex.value] || null
+    );
+
+    const formDirty = computed(() => {
+      const it = current.value;
+      if (!it) return false;
+      return form.base.trim() !== baseOf(it.name)
+        || normalizeFolder(form.folder) !== folderOf(it.path)
+        || form.description.trim() !== (it.description || '')
+        || form.category.trim() !== (it.category || '')
+        || form.tagInput.trim() !== ''
+        || form.tags.join('\u0001') !== (it.tags || []).join('\u0001');
+    });
+
+    function fillForm(it) {
+      form.base = it ? baseOf(it.name) : '';
+      form.folder = it ? folderOf(it.path) : '';
+      form.description = it ? it.description || '' : '';
+      form.category = it ? it.category || '' : '';
+      form.tags = it ? [...(it.tags || [])] : [];
+      form.tagInput = '';
+    }
+
+    // Charge le média affiché dans la visionneuse
+    watch(current, async (it) => {
+      fillForm(it);
+      if (viewerUrl.value) { URL.revokeObjectURL(viewerUrl.value); viewerUrl.value = null; }
+      if (!it) return;
+      try {
+        const f = await getFile(it);
+        if (current.value === it) viewerUrl.value = URL.createObjectURL(f);
+      } catch (e) { error.value = 'Impossible de lire ' + it.path; }
+    });
+
+    watch([filter, catFilter, tagFilter, folderFilter, search, sort], () => {
+      viewerIndex.value = null;
+      lastIndex = null;
+    });
+
+    /* ----- Index ----- */
+    function buildIndex() {
+      return {
+        generatedAt: new Date().toISOString(),
+        folder: folderName.value,
+        total: items.value.length,
+        images: counts.value.image,
+        videos: counts.value.video,
+        categories: categories.value,
+        tags: allTags.value,
+        items: items.value,
+      };
+    }
+
+    async function persist(msg) {
+      if (!source.root) {
+        status.value = msg + " Utilisez « Télécharger l'index » pour conserver vos modifications.";
+        return false;
+      }
+      try {
+        const fh = await source.root.getFileHandle('index.json', { create: true });
+        const w = await fh.createWritable();
+        await w.write(JSON.stringify(buildIndex(), null, 2));
+        await w.close();
+        status.value = msg + ' (index.json mis à jour)';
+        return true;
+      } catch (e) {
+        status.value = msg + " Écriture de index.json impossible : utilisez « Télécharger l'index ».";
+        return false;
+      }
+    }
+
+    function downloadIndex() {
+      const blob = new Blob([JSON.stringify(buildIndex(), null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'index.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    async function readExistingIndex(root) {
+      try {
+        const fh = await root.getFileHandle('index.json');
+        const data = JSON.parse(await (await fh.getFile()).text());
+        if (!Array.isArray(data.items)) return null;
+        data.items = data.items.map(normalize);
+        return data;
+      } catch (e) { return null; }
+    }
+
+    function resetViewState() {
+      viewerIndex.value = null;
+      catFilter.value = ''; tagFilter.value = ''; folderFilter.value = '';
+      search.value = ''; filter.value = 'all';
+      selectMode.value = false;
+      selected.value = new Set();
+      lastIndex = null;
+    }
+
+    async function reindex() {
+      if (!source.root) return;
+      loading.value = true; error.value = '';
+      try {
+        // On conserve les métadonnées des fichiers déjà connus (clé = chemin)
+        const old = new Map(items.value.map(i => [i.path, i]));
+        const fresh = await scanDir(source.root);
+        items.value = fresh.map(f => {
+          const o = old.get(f.path);
+          return o ? { ...f, description: o.description || '', category: o.category || '', tags: [...(o.tags || [])] } : f;
+        });
+        // La sélection ne garde que les fichiers qui existent encore
+        const paths = new Set(items.value.map(i => i.path));
+        selected.value = new Set([...selected.value].filter(p => paths.has(p)));
+        await persist(`${items.value.length} fichiers indexés.`);
+      } catch (e) {
+        error.value = e.message;
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    async function openFolder() {
+      error.value = ''; status.value = '';
+      if (!window.showDirectoryPicker) { fallback.value.click(); return; }
+      try {
+        const root = await window.showDirectoryPicker({ mode: 'readwrite' });
+        source = { root, files: null };
+        hasRoot.value = true;
+        folderName.value = root.name;
+        items.value = [];
+        resetViewState();
+        const existing = await readExistingIndex(root);
+        if (existing) {
+          items.value = existing.items;
+          status.value = `Index existant chargé : ${existing.total} fichiers (généré le ${new Date(existing.generatedAt).toLocaleString('fr-FR')}). Cliquez sur « Réindexer » pour le mettre à jour.`;
+        } else {
+          await reindex();
+        }
+      } catch (e) {
+        if (e.name !== 'AbortError') error.value = e.message;
+      }
+    }
+
+    // Repli pour les navigateurs sans File System Access API (lecture seule)
+    async function onFallback(e) {
+      error.value = '';
+      const files = new Map();
+      const list = [];
+      let indexFile = null;
+      let root = '';
+      for (const f of e.target.files) {
+        const rel = (f.webkitRelativePath || f.name).split('/');
+        if (rel.length > 1 && !root) root = rel[0];
+        const parts = rel.length > 1 ? rel.slice(1) : rel;
+        if (parts.some(p => p.startsWith('.'))) continue;
+        const path = parts.join('/');
+        if (parts.length === 1 && f.name.toLowerCase() === 'index.json') { indexFile = f; continue; }
+        const type = typeOf(f.name);
+        if (!type) continue;
+        files.set(path, f);
+        list.push({
+          name: f.name, path, type, size: f.size, modified: f.lastModified, mime: f.type,
+          description: '', category: '', tags: [],
+        });
+      }
+
+      // Restaure les métadonnées depuis un index.json existant
+      const meta = new Map();
+      if (indexFile) {
+        try {
+          const data = JSON.parse(await indexFile.text());
+          (data.items || []).forEach(i => meta.set(i.path, normalize(i)));
+        } catch (err) { /* index illisible : on l'ignore */ }
+      }
+
+      source = { root: null, files };
+      hasRoot.value = false;
+      folderName.value = root;
+      resetViewState();
+      items.value = list.map(i => {
+        const o = meta.get(i.path);
+        return o ? { ...i, description: o.description, category: o.category, tags: [...o.tags] } : i;
+      });
+      status.value = `${list.length} fichiers trouvés${meta.size ? ' (métadonnées de index.json restaurées)' : ''}. `
+        + "Ce navigateur est en lecture seule : renommage, déplacement et suppression indisponibles, utilisez « Télécharger l'index » pour conserver vos modifications.";
+      e.target.value = '';
+    }
+
+    /* ----- Tags (panneau d'un fichier) ----- */
+    function parseTags(text) {
+      return text.split(',').map(t => t.trim().replace(/^#/, '')).filter(Boolean);
+    }
+    function addTag() {
+      for (const t of parseTags(form.tagInput)) {
+        if (!form.tags.some(x => x.toLowerCase() === t.toLowerCase())) form.tags.push(t);
+      }
+      form.tagInput = '';
+    }
+    function removeTag(t) { form.tags = form.tags.filter(x => x !== t); }
+    function onTagKey(e) {
+      if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(); }
+      else if (e.key === 'Backspace' && !form.tagInput && form.tags.length) form.tags.pop();
+    }
+
+    /* ----- Enregistrement / renommage / déplacement (un fichier) ----- */
+    function validateName(base, it, folder) {
+      if (!base) return 'Le nom ne peut pas être vide.';
+      if (/[\\/:*?"<>|]/.test(base)) return 'Caractères interdits : \\ / : * ? " < > |';
+      if (base.startsWith('.')) return 'Le nom ne peut pas commencer par un point.';
+      const fp = validateFolder(folder);
+      if (fp) return fp;
+      const newPath = joinPath(folder, base + extOf(it.name)).toLowerCase();
+      if (items.value.some(i => i.path !== it.path && i.path.toLowerCase() === newPath)) {
+        return 'Un fichier porte déjà ce nom dans ce dossier.';
+      }
+      return '';
+    }
+
+    async function save() {
+      const it = current.value;
+      if (!it || busy.value) return false;
+      error.value = '';
+      addTag();
+
+      const base = form.base.trim();
+      const newName = base + extOf(it.name);
+      const newFolder = normalizeFolder(form.folder);
+      const newPath = joinPath(newFolder, newName);
+      const meta = {
+        description: form.description.trim(),
+        category: form.category.trim(),
+        tags: [...form.tags],
+      };
+
+      busy.value = true;
+      try {
+        let target = it;
+        let message = 'Modifications enregistrées.';
+        if (newPath !== it.path) {
+          if (!source.root) { error.value = 'Renommage / déplacement impossible sans accès en écriture (utilisez Chrome ou Edge).'; return false; }
+          const problem = validateName(base, it, newFolder);
+          if (problem) { error.value = problem; return false; }
+          try {
+            await relocateOnDisk(it, newFolder, newName);
+          } catch (e) {
+            error.value = 'Opération impossible : ' + e.message;
+            return false;
+          }
+          const idx = items.value.findIndex(i => i.path === it.path);
+          target = { ...it, name: newName, path: newPath, ...meta };
+          items.value[idx] = target;     // nouvel objet : la visionneuse recharge le fichier
+          message = newFolder !== folderOf(it.path)
+            ? 'Fichier déplacé et modifications enregistrées.'
+            : 'Fichier renommé et modifications enregistrées.';
+        } else {
+          Object.assign(it, meta);       // modification en place : pas de rechargement
+        }
+
+        // Repositionne la visionneuse (le tri ou les filtres ont pu changer l'ordre)
+        const pos = filtered.value.findIndex(i => i.path === target.path);
+        viewerIndex.value = pos === -1 ? null : pos;
+        if (pos !== -1 && target === it) fillForm(it);
+
+        await persist(message);
+        return true;
+      } finally {
+        busy.value = false;
+      }
+    }
+
+    async function remove() {
+      const it = current.value;
+      if (!it || busy.value) return;
+      if (!source.root) { error.value = 'Suppression impossible sans accès en écriture (utilisez Chrome ou Edge).'; return; }
+      if (!confirm(`Supprimer définitivement « ${it.path} » du disque ?\nCette action est irréversible.`)) return;
+
+      error.value = '';
+      busy.value = true;
+      try {
+        try {
+          const dir = await getParentDir(it.path);
+          await dir.removeEntry(it.name);
+        } catch (e) {
+          if (e.name !== 'NotFoundError') { error.value = 'Suppression impossible : ' + e.message; return; }
+          // déjà absent du disque : on le retire simplement de l'index
+        }
+        const name = it.path;
+        items.value = items.value.filter(i => i.path !== name);
+        const n = filtered.value.length;
+        viewerIndex.value = n === 0 ? null : Math.min(viewerIndex.value, n - 1);
+        await persist(`« ${name} » supprimé.`);
+      } finally {
+        busy.value = false;
+      }
+    }
+
+    /* ----- Sélection multiple ----- */
+    const selectedItems = computed(() => items.value.filter(i => selected.value.has(i.path)));
+    const hiddenSelected = computed(() => {
+      const visible = new Set(filtered.value.map(i => i.path));
+      return selectedItems.value.filter(i => !visible.has(i.path)).length;
+    });
+    const selectionTags = computed(() =>
+      [...new Set(selectedItems.value.flatMap(i => i.tags || []))].sort((a, b) => a.localeCompare(b, 'fr'))
+    );
+
+    function toggleSelectMode() {
+      selectMode.value = !selectMode.value;
+      if (!selectMode.value) clearSelection();
+    }
+    function clearSelection() { selected.value = new Set(); lastIndex = null; }
+    function selectAllVisible() {
+      selected.value = new Set([...selected.value, ...filtered.value.map(i => i.path)]);
+    }
+
+    // Clic sur une vignette : ouvre la visionneuse, ou (re)sélectionne en mode sélection (Maj = plage)
+    function onCard(it, i, ev) {
+      if (!selectMode.value) { openAt(i); return; }
+      const next = new Set(selected.value);
+      if (ev && ev.shiftKey && lastIndex !== null && filtered.value[lastIndex]) {
+        const a = Math.min(lastIndex, i), b = Math.max(lastIndex, i);
+        for (let k = a; k <= b; k++) next.add(filtered.value[k].path);
+      } else if (next.has(it.path)) {
+        next.delete(it.path);
+      } else {
+        next.add(it.path);
+      }
+      lastIndex = i;
+      selected.value = next;
+    }
+
+    /* ----- Actions groupées ----- */
+    const bulkTitle = computed(() => ({
+      category: 'Définir la catégorie',
+      tags: 'Ajouter / retirer des tags',
+      move: 'Déplacer vers un dossier',
+    }[bulk.kind] || ''));
+
+    function openBulk(kind) {
+      if (!selectedItems.value.length) return;
+      Object.assign(bulk, {
+        open: true, kind, busy: false, progress: '', error: '',
+        category: '', clearCategory: false,
+        addTags: [], tagInput: '', removeTags: [],
+        folder: '',
+      });
+    }
+    function closeBulk() { if (!bulk.busy) bulk.open = false; }
+
+    function addBulkTag() {
+      for (const t of parseTags(bulk.tagInput)) {
+        if (!bulk.addTags.some(x => x.toLowerCase() === t.toLowerCase())) bulk.addTags.push(t);
+      }
+      bulk.tagInput = '';
+    }
+    function removeBulkTag(t) { bulk.addTags = bulk.addTags.filter(x => x !== t); }
+    function onBulkTagKey(e) {
+      if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addBulkTag(); }
+    }
+
+    async function applyBulk() {
+      bulk.error = '';
+      if (bulk.kind === 'category') return applyBulkCategory();
+      if (bulk.kind === 'tags') return applyBulkTags();
+      if (bulk.kind === 'move') return applyBulkMove();
+    }
+
+    async function applyBulkCategory() {
+      const value = bulk.clearCategory ? '' : bulk.category.trim();
+      if (!bulk.clearCategory && !value) { bulk.error = 'Saisissez une catégorie ou cochez « Effacer la catégorie ».'; return; }
+      const list = [...selectedItems.value];
+      for (const it of list) it.category = value;
+      bulk.open = false;
+      await persist(value ? `Catégorie « ${value} » appliquée à ${list.length} fichier(s).` : `Catégorie effacée pour ${list.length} fichier(s).`);
+    }
+
+    async function applyBulkTags() {
+      addBulkTag();
+      if (!bulk.addTags.length && !bulk.removeTags.length) { bulk.error = 'Ajoutez ou sélectionnez au moins un tag.'; return; }
+      const list = [...selectedItems.value];
+      const lower = (s) => s.toLowerCase();
+      for (const it of list) {
+        const tags = (it.tags || []).filter(t => !bulk.removeTags.some(r => lower(r) === lower(t)));
+        for (const t of bulk.addTags) if (!tags.some(x => lower(x) === lower(t))) tags.push(t);
+        it.tags = tags;
+      }
+      bulk.open = false;
+      await persist(`Tags mis à jour pour ${list.length} fichier(s).`);
+    }
+
+    // Trouve un nom libre dans le dossier de destination : nom.ext, nom (1).ext, ...
+    async function uniqueName(folder, name) {
+      const dir = await getDirByPath(folder, true);
+      const base = baseOf(name), ext = extOf(name);
+      for (let n = 0; n < 1000; n++) {
+        const cand = n === 0 ? name : `${base} (${n})${ext}`;
+        const inIndex = items.value.some(i => i.path.toLowerCase() === joinPath(folder, cand).toLowerCase());
+        let onDisk = false;
+        try { await dir.getFileHandle(cand); onDisk = true; } catch (e) { /* libre */ }
+        if (!inIndex && !onDisk) return cand;
+      }
+      throw new Error('aucun nom libre trouvé');
+    }
+
+    async function applyBulkMove() {
+      if (!source.root) { bulk.error = 'Déplacement impossible sans accès en écriture (utilisez Chrome ou Edge).'; return; }
+      const dest = normalizeFolder(bulk.folder);
+      const problem = validateFolder(dest);
+      if (problem) { bulk.error = problem; return; }
+      const list = selectedItems.value.filter(i => folderOf(i.path) !== dest);
+      if (!list.length) { bulk.error = 'Les fichiers sélectionnés sont déjà dans ce dossier.'; return; }
+
+      bulk.busy = true;
+      const failed = [];
+      let ok = 0;
+      try {
+        for (let k = 0; k < list.length; k++) {
+          const it = list[k];
+          bulk.progress = `Déplacement ${k + 1} / ${list.length}...`;
+          try {
+            const newName = await uniqueName(dest, it.name);
+            await relocateOnDisk(it, dest, newName);
+            const idx = items.value.findIndex(i => i.path === it.path);
+            const oldPath = it.path;
+            items.value[idx] = { ...it, tags: [...(it.tags || [])], name: newName, path: joinPath(dest, newName) };
+            const s = new Set(selected.value); s.delete(oldPath); selected.value = s;
+            ok++;
+          } catch (e) {
+            failed.push(`${it.name} (${e.message})`);
+          }
+        }
+      } finally {
+        bulk.busy = false;
+        bulk.open = false;
+      }
+      await persist(`${ok} fichier(s) déplacé(s) vers « ${dest || 'la racine'} ».`);
+      if (failed.length) {
+        error.value = `${failed.length} échec(s) : ` + failed.slice(0, 5).join(' ; ') + (failed.length > 5 ? ' ...' : '');
+      }
+    }
+
+    async function bulkDelete() {
+      const list = [...selectedItems.value];
+      if (!list.length || !source.root || working.value) return;
+      if (!confirm(`Supprimer définitivement ${list.length} fichier(s) du disque ?\nCette action est irréversible.`)) return;
+
+      error.value = '';
+      working.value = true;
+      const gone = new Set();
+      const failed = [];
+      try {
+        for (let k = 0; k < list.length; k++) {
+          const it = list[k];
+          progressText.value = `Suppression ${k + 1} / ${list.length}...`;
+          try {
+            const dir = await getParentDir(it.path);
+            await dir.removeEntry(it.name);
+            gone.add(it.path);
+          } catch (e) {
+            if (e.name === 'NotFoundError') gone.add(it.path);   // déjà absent du disque
+            else failed.push(`${it.name} (${e.message})`);
+          }
+        }
+        items.value = items.value.filter(i => !gone.has(i.path));
+        selected.value = new Set(list.filter(i => !gone.has(i.path)).map(i => i.path));  // les échecs restent sélectionnés
+        await persist(`${gone.size} fichier(s) supprimé(s).`);
+        if (failed.length) {
+          error.value = `${failed.length} échec(s) : ` + failed.slice(0, 5).join(' ; ') + (failed.length > 5 ? ' ...' : '');
+        }
+      } finally {
+        working.value = false;
+      }
+    }
+
+    /* ----- Navigation dans la visionneuse ----- */
+    // Propose d'enregistrer avant de quitter l'élément courant
+    async function guard() {
+      if (!formDirty.value) return true;
+      if (confirm('Modifications non enregistrées.\nOK = enregistrer, Annuler = abandonner les modifications.')) {
+        return await save();
+      }
+      return true;
+    }
+
+    function openAt(i) { error.value = ''; viewerIndex.value = i; }
+
+    async function close() {
+      if (busy.value || !(await guard())) return;
+      viewerIndex.value = null;
+    }
+
+    async function move(d) {
+      const n = filtered.value.length;
+      if (!n || busy.value || !(await guard())) return;
+      error.value = '';
+      viewerIndex.value = ((viewerIndex.value ?? 0) + d + n) % n;
+    }
+
+    function onKey(e) {
+      if (bulk.open) {
+        if (e.key === 'Escape') closeBulk();
+        return;
+      }
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+      if (viewerIndex.value === null) {
+        if (selectMode.value && e.key === 'Escape' && !working.value) toggleSelectMode();
+        return;
+      }
+      if (e.key === 'Escape') close();
+      else if (e.key === 'ArrowLeft') move(-1);
+      else if (e.key === 'ArrowRight') move(1);
+    }
+    onMounted(() => window.addEventListener('keydown', onKey));
+    onBeforeUnmount(() => window.removeEventListener('keydown', onKey));
+
+    return {
+      items, filter, catFilter, tagFilter, folderFilter, search, sort, loading, busy, working, progressText,
+      error, status, hasRoot, fallback, form, formDirty, counts, categories, allTags, folders,
+      filtered, current, viewerIndex, viewerUrl,
+      selectMode, selected, selectedItems, hiddenSelected, selectionTags,
+      bulk, bulkTitle,
+      openFolder, reindex, downloadIndex, onFallback, openAt, close, move,
+      addTag, removeTag, onTagKey, save, remove,
+      toggleSelectMode, clearSelection, selectAllVisible, onCard,
+      openBulk, closeBulk, applyBulk, addBulkTag, removeBulkTag, onBulkTagKey, bulkDelete,
+      fmtSize, fmtDate, extOf,
+    };
+  },
+}).mount('#app');
+</script>
+</body>
+</html>
