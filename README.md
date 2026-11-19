@@ -4,22 +4,51 @@ Galerie locale pour un dossier d'images et de vidéos : index `index.json`, desc
 catégories, tags, renommage / déplacement / suppression, sélection multiple, et
 **téléchargeur de vidéos YouTube et Pinterest**.
 
-## Version portable (un seul fichier)
+## Windows : un seul fichier
 
-Les fichiers prêts à l'emploi sont générés automatiquement par GitHub Actions
-(onglet **Actions** → dernier build → *Artifacts*, ou page **Releases** pour un tag `v*`) :
+Téléchargez **`DashGallery-vX.Y.Z-windows-x64.exe`** depuis la page
+[Releases](https://github.com/desmond8500/DashGallery/releases) et double-cliquez : l'appli
+s'ouvre dans sa propre fenêtre (Edge ou Chrome en mode application). Pas d'installation, pas de
+Python, pas de serveur à lancer, pas de console. Fermer la fenêtre arrête l'appli.
 
-| Fichier | Usage | Téléchargeur |
-|---|---|---|
-| `DashGallery.exe` (Windows) / `DashGallery` (Linux) | double-clic : lance le serveur et ouvre le navigateur. Python inutile. | ✓ (yt-dlp inclus) |
-| `dashgallery.py` | `python dashgallery.py` (avec `pip install yt-dlp`) | ✓ |
-| `DashGallery.html` | double-clic, aucun serveur | ✗ |
+- **Hors ligne** : la galerie fonctionne sans connexion (tout est dans l'exe).
+- **Téléchargeur** : yt-dlp est téléchargé automatiquement au premier usage dans
+  `%LOCALAPPDATA%\DashGallery` puis mis à jour à chaque lancement. Vous pouvez aussi poser
+  `yt-dlp.exe` à côté de l'exe.
+- **ffmpeg** (meilleure qualité YouTube) : posez `ffmpeg.exe` à côté de l'exe ou dans le PATH.
+- La version s'affiche dans l'en-tête ; un lien apparaît quand une nouvelle release existe.
+- Journal : `%LOCALAPPDATA%\DashGallery\dashgallery.log`. `DashGallery.exe --version` affiche la version.
 
-Tout fonctionne **hors ligne** (Vue est intégré), sauf bien sûr le téléchargement de vidéos.
-Pour la meilleure qualité YouTube, posez `ffmpeg.exe` (ou `ffmpeg`) à côté de l'exécutable.
+Windows SmartScreen peut avertir la première fois (exe non signé) : « Informations
+complémentaires » → « Exécuter quand même ».
 
-Pour les construire soi-même : `python build.py` → dossier `dist/`
-(puis `pyinstaller --onefile --name DashGallery dist/dashgallery.py` pour l'exécutable).
+Autres fichiers de chaque release : version ARM64, Linux, `DashGallery-vX.Y.Z.html` (galerie seule,
+double-clic, sans téléchargeur), `dashgallery-vX.Y.Z.py` (script Python unique), `SHA256SUMS.txt`.
+
+## Versions et releases
+
+Numérotation [SemVer](https://semver.org/lang/fr/) (`v1.0.0`, `v1.1.0` pour une nouveauté, `v1.0.1`
+pour une correction, `v2.0.0-beta.1` pour une préversion), historique dans [CHANGELOG.md](CHANGELOG.md).
+
+Publier une version :
+
+```bash
+# 1. ajouter la section de la version dans CHANGELOG.md, committer sur main
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+GitHub Actions construit alors tous les fichiers et crée la release avec les notes générées.
+Chaque push et chaque pull request produit aussi des builds de test (onglet **Actions** → *Artifacts*).
+
+## Construire soi-même
+
+```bash
+python build.py --version v1.0.0      # dist/ + go/web/ (télécharge Vue la première fois)
+cd go
+go build -ldflags "-H=windowsgui -X main.version=v1.0.0" -o DashGallery.exe .   # depuis Windows
+GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui -X main.version=v1.0.0" -o DashGallery.exe .  # ailleurs
+```
 
 ## Lancer depuis les sources
 

@@ -39,6 +39,8 @@ except ImportError:  # le serveur démarre quand même, l'API signale l'absence
 # Dossier de l'appli (à côté de l'exécutable en version .exe : on y cherche aussi ffmpeg)
 ROOT = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
 
+APP_VERSION = "dev"  # remplacé par build.py --version
+
 # Version portable : build.py remplit ce dictionnaire (chemin -> fichier encodé en base64)
 EMBEDDED = {}  # @@EMBEDDED@@
 WORK = Path(tempfile.gettempdir()) / "dashgallery-downloads"
@@ -188,7 +190,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/api/status":
-            return self.send_json({"ok": True, "ytdlp": yt_dlp is not None,
+            return self.send_json({"ok": True, "appVersion": APP_VERSION, "ytdlp": yt_dlp is not None,
                                    "version": getattr(getattr(yt_dlp, "version", None), "__version__", None),
                                    "ffmpeg": bool(find_ffmpeg())})
         m = re.fullmatch(r"/api/jobs/([0-9a-f]{32})(/file)?", path)
@@ -240,6 +242,10 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if not self.same_origin():
             return self.send_json({"error": "origine refusée"}, 403)
+        if urlparse(self.path).path == "/api/ping":
+            self.send_response(204)
+            self.end_headers()
+            return
         if urlparse(self.path).path != "/api/download":
             return self.send_json({"error": "introuvable"}, 404)
         if yt_dlp is None:

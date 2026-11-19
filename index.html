@@ -161,6 +161,8 @@
   .pill { background: var(--accent); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11px; margin-left: 4px; }
   .srv { font-size: 12px; padding: 6px 10px; border-radius: 8px; background: #11141a; }
   .srv.ko { color: #ffcb6b; }
+  .ver { color: var(--muted); font-size: 12px; }
+  .upd { color: #6bdb8f; font-size: 12px; border: 1px solid #2d5a3a; border-radius: 999px; padding: 2px 10px; text-decoration: none; }
   .offline { color: #ffcb6b; font-size: 12px; border: 1px solid #5a4a22; border-radius: 999px; padding: 2px 10px; }
 
   @media (max-width: 800px) {
@@ -180,6 +182,8 @@
 <div id="app">
   <header>
     <h1>📁 Galerie</h1>
+    <span v-if="appVersion" class="ver" title="Version de DashGallery">{{ appVersion }}</span>
+    <a v-if="update" class="upd" :href="update.url" target="_blank" rel="noopener">⬆ {{ update.latest }} disponible</a>
     <span v-if="!online" class="offline" title="Galerie disponible, téléchargeur indisponible">● Hors ligne</span>
     <button class="primary" @click="openFolder">Choisir un dossier</button>
     <button v-if="hasRoot" :disabled="loading || working" @click="reindex">Réindexer</button>
@@ -1152,7 +1156,28 @@ createApp({
     };
     onMounted(() => { window.addEventListener('online', setOnline); window.addEventListener('offline', setOnline); });
     onBeforeUnmount(() => { window.removeEventListener('online', setOnline); window.removeEventListener('offline', setOnline); });
-    const RUNNING = ['sending', 'queued', 'downloading', 'processing', 'importing'];
+    // Version de l'appli + nouvelle release disponible ? (serveur Python ou exe Go)
+    const appVersion = ref('');
+    const update = ref(null);
+    onMounted(async () => {
+      try {
+        const s = await (await fetch('/api/status', { cache: 'no-store' })).json();
+        dl.server = s;
+        if (s.appVersion && s.appVersion !== 'dev') {
+          appVersion.value = s.appVersion;
+          if (navigator.onLine) {
+            const u = await (await fetch('/api/update', { cache: 'no-store' })).json();
+            if (u.newer && u.url) update.value = u;
+          }
+        }
+      } catch (e) { /* ouvert sans serveur */ }
+      // Signe de vie : l'exe Go s'arrête quand plus aucune fenêtre n'est ouverte
+      if (location.protocol.startsWith('http')) {
+        const ping = () => fetch('/api/ping', { method: 'POST', keepalive: true }).catch(() => {});
+        ping(); setInterval(ping, 20000);
+      }
+    });
+    const RUNNING = ['sending', 'queued', 'installing', 'downloading', 'processing', 'importing'];
     const isRunning = (j) => RUNNING.includes(j.status);
     const dlActive = computed(() => dl.jobs.filter(isRunning).length);
     let pollTimer = null;
@@ -1181,7 +1206,7 @@ createApp({
 
     function jobLabel(j) {
       return {
-        sending: 'Envoi...', queued: 'En attente...',
+        sending: 'Envoi...', queued: 'En attente...', installing: 'Installation de yt-dlp...',
         downloading: j.progress != null ? `${Math.round(j.progress)} %` + (j.eta ? ` · ${j.eta}s` : '') : 'Téléchargement...',
         processing: 'Conversion...', importing: 'Enregistrement...',
         saved: j.savedPath ? '✓ ' + j.savedPath : '✓ Enregistré', error: 'Échec',
@@ -1219,7 +1244,7 @@ createApp({
     function startPolling() {
       if (pollTimer) return;
       pollTimer = setInterval(async () => {
-        const pending = dl.jobs.filter(j => j.id && ['queued', 'downloading', 'processing'].includes(j.status));
+        const pending = dl.jobs.filter(j => j.id && ['queued', 'installing', 'downloading', 'processing'].includes(j.status));
         if (!pending.length) { clearInterval(pollTimer); pollTimer = null; return; }
         for (const j of pending) {
           try {
@@ -1332,7 +1357,7 @@ createApp({
       filtered, current, viewerIndex, viewerUrl,
       selectMode, selected, selectedItems, hiddenSelected, selectionTags,
       bulk, bulkTitle,
-      dl, dlActive, online, isRunning, openDl, startDownloads, jobLabel, dismissJob,
+      dl, dlActive, online, appVersion, update, isRunning, openDl, startDownloads, jobLabel, dismissJob,
       openFolder, reindex, downloadIndex, onFallback, openAt, close, move,
       addTag, removeTag, onTagKey, save, remove,
       toggleSelectMode, clearSelection, selectAllVisible, onCard,

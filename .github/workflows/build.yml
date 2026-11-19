@@ -1,5 +1,7 @@
-name: Versions portables
+name: Build & Release
 
+# - push / PR : construit tout, fichiers disponibles dans l'onglet Actions (Artifacts)
+# - tag vX.Y.Z : publie en plus une release GitHub avec les exécutables
 on:
   push:
     branches: [main]
@@ -12,33 +14,54 @@ permissions:
 
 jobs:
   build:
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Fichiers uniques (HTML + Python)
-        run: python build.py
-      - name: Exécutable (PyInstaller, yt-dlp inclus)
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Numéro de version
+        id: v
+        shell: bash
         run: |
-          pip install pyinstaller yt-dlp
-          pyinstaller --onefile --name DashGallery --distpath dist/bin dist/dashgallery.py
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME}"
+          else V="$(git describe --tags --always 2>/dev/null || echo dev)-dev"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Version : $V"
+
+      - name: Fichiers uniques + fichiers intégrés (Vue inclus)
+        run: python build.py --version "${{ steps.v.outputs.version }}"
+
+      - name: Exécutables Go
+        working-directory: go
+        shell: bash
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          OUT=../dist/release; mkdir -p $OUT
+          build() { GOOS=$1 GOARCH=$2 CGO_ENABLED=0 go build -trimpath -ldflags "$3 -s -w -X main.version=$V" -o "$OUT/$4" .; }
+          build windows amd64 "-H=windowsgui" "DashGallery-$V-windows-x64.exe"
+          build windows arm64 "-H=windowsgui" "DashGallery-$V-windows-arm64.exe"
+          build linux   amd64 ""              "DashGallery-$V-linux-x64"
+          cp ../dist/DashGallery.html "$OUT/DashGallery-$V.html"
+          cp ../dist/dashgallery.py   "$OUT/dashgallery-$V.py"
+          cd $OUT && sha256sum * > SHA256SUMS.txt && ls -lh
+
       - uses: actions/upload-artifact@v4
         with:
-          name: DashGallery-${{ runner.os }}
-          path: |
-            dist/DashGallery.html
-            dist/dashgallery.py
-            dist/bin/*
-      - name: Publier la release (tags v*)
+          name: DashGallery-${{ steps.v.outputs.version }}
+          path: dist/release/*
+
+      - name: Release GitHub
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/bin/*
-            dist/DashGallery.html
-            dist/dashgallery.py
+          name: DashGallery ${{ steps.v.outputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: dist/release/*

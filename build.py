@@ -6,15 +6,18 @@ Construit les versions portables (un seul fichier chacune) dans dist/ :
                          (pas de téléchargeur : il a besoin du serveur)
   dist/dashgallery.py    serveur + galerie + Vue dans un seul script Python
                          (python dashgallery.py ; yt-dlp requis pour le téléchargeur)
+  go/web/                fichiers intégrés dans l'exécutable Go (go build dans go/)
 
-    python build.py
+    python build.py [--version v1.2.3]
 
 Vue est pris dans vendor/vue.global.prod.js, ou téléchargé s'il manque (connexion requise
-la première fois). L'exécutable Windows est produit à partir de dist/dashgallery.py par
-PyInstaller (voir .github/workflows/build.yml).
+la première fois). L'exécutable Windows (Go) se compile ensuite dans go/ :
+voir README et .github/workflows/build.yml.
 """
+import argparse
 import base64
 import re
+import shutil
 import sys
 from pathlib import Path
 from urllib.request import urlopen
@@ -50,6 +53,9 @@ def inline_vue(html, vue):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--version", default="dev")
+    args = ap.parse_args()
     DIST.mkdir(exist_ok=True)
     vue = get_vue()
     html = inline_vue((ROOT / "index.html").read_text(encoding="utf-8"), vue)
@@ -74,10 +80,19 @@ def main():
         lines.append(f"    {name!r}: {base64.b64encode(data).decode()!r},")
     lines.append("}")
     server = (ROOT / "server.py").read_text(encoding="utf-8")
+    server = server.replace('APP_VERSION = "dev"', f"APP_VERSION = {args.version!r}", 1)
     marker = "EMBEDDED = {}  # @@EMBEDDED@@"
     if server.count(marker) != 1:
         sys.exit("Repère EMBEDDED introuvable dans server.py")
     (DIST / "dashgallery.py").write_text(server.replace(marker, "\n".join(lines)), encoding="utf-8")
+
+    # 3) Fichiers pour l'exécutable Go (go:embed)
+    web = ROOT / "go" / "web"
+    shutil.rmtree(web, ignore_errors=True)
+    for name, data in assets.items():
+        (web / name).parent.mkdir(parents=True, exist_ok=True)
+        (web / name).write_bytes(data)
+    print("✓ go/web/ prêt pour go build")
 
     for f in ("DashGallery.html", "dashgallery.py"):
         print(f"✓ dist/{f}  ({(DIST / f).stat().st_size / 1024:.0f} Ko)")

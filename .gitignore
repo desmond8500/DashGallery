@@ -6,3 +6,6 @@ dist/
 build/
 *.spec
 vendor/*.tmp
+go/web/
+*.exe
+go/dashgallery
