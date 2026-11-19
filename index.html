@@ -132,6 +132,31 @@
   .checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
   .check-row { display: flex; align-items: center; margin: 0 !important; font-size: 13px !important; color: var(--text) !important; }
 
+  /* Téléchargeur YouTube / Pinterest */
+  .dialog.wide { width: 560px; }
+  .dialog textarea {
+    width: 100%; background: #222733; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 14px; resize: vertical;
+  }
+  .dialog textarea:focus { outline: none; border-color: var(--accent); }
+  .dialog .row2 { display: flex; gap: 10px; }
+  .dialog .row2 > div { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .dialog select { width: 100%; }
+  .jobs { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .job { background: #11141a; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+  .job .top { display: flex; gap: 8px; align-items: center; }
+  .job .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .job .st { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .job .st.ok { color: #6bdb8f; } .job .st.ko { color: var(--danger); }
+  .job .x { border: none; background: none; color: var(--muted); padding: 0 4px; }
+  .bar { height: 4px; background: #222733; border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); transition: width .3s; }
+  .bar.indet > div { width: 30% !important; animation: indet 1.2s infinite ease-in-out; }
+  @keyframes indet { from { margin-left: -30%; } to { margin-left: 100%; } }
+  .pill { background: var(--accent); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11px; margin-left: 4px; }
+  .srv { font-size: 12px; padding: 6px 10px; border-radius: 8px; background: #11141a; }
+  .srv.ko { color: #ffcb6b; }
+
   @media (max-width: 800px) {
     .viewer { flex-direction: column; }
     .panel { width: auto; max-height: 48vh; border-left: none; border-top: 1px solid var(--line); }
@@ -147,6 +172,7 @@
     <h1>📁 Galerie</h1>
     <button class="primary" @click="openFolder">Choisir un dossier</button>
     <button v-if="hasRoot" :disabled="loading || working" @click="reindex">Réindexer</button>
+    <button @click="openDl">⬇ Télécharger une vidéo<span v-if="dlActive" class="pill">{{ dlActive }}</span></button>
     <button v-if="items.length" @click="downloadIndex">Télécharger l'index</button>
     <button v-if="items.length" :class="{active: selectMode}" @click="toggleSelectMode">
       {{ selectMode ? 'Terminer la sélection' : 'Sélectionner' }}
@@ -188,6 +214,7 @@
     <p style="font-size:42px;margin:0">🖼️ 🎬</p>
     <p>Cliquez sur « Choisir un dossier » pour indexer vos images et vidéos.</p>
     <p style="font-size:13px">Chrome / Edge recommandés : l'index <code>index.json</code> (avec descriptions, catégories et tags) est écrit dans le dossier, et le renommage, le déplacement et la suppression de fichiers sont possibles.</p>
+    <p style="font-size:13px">« ⬇ Télécharger une vidéo » récupère des vidéos YouTube et Pinterest (nécessite <code>python server.py</code>).</p>
   </div>
 
   <div class="grid" :class="{withbar: selectMode}" v-if="filtered.length">
@@ -252,6 +279,64 @@
       <div class="actions">
         <button :disabled="bulk.busy" @click="closeBulk">Annuler</button>
         <button class="primary" :disabled="bulk.busy" @click="applyBulk">{{ bulk.busy ? bulk.progress : 'Appliquer' }}</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Téléchargeur YouTube / Pinterest -->
+  <div v-if="dl.open" class="modal" @click.self="dl.open = false">
+    <div class="dialog wide">
+      <h2>⬇ Télécharger depuis YouTube ou Pinterest</h2>
+
+      <div v-if="dl.server === null" class="srv">Connexion au serveur local...</div>
+      <div v-else-if="!dl.server.ok" class="srv ko">
+        ⚠ Serveur local injoignable. Lancez <code>python server.py</code> puis ouvrez
+        <code>http://localhost:8000</code> (la galerie ne peut pas télécharger seule depuis un fichier ouvert directement).
+      </div>
+      <div v-else-if="!dl.server.ytdlp" class="srv ko">⚠ yt-dlp n'est pas installé sur le serveur : <code>pip install -r requirements.txt</code></div>
+      <div v-else-if="!dl.server.ffmpeg" class="srv ko">ffmpeg absent : la qualité sera limitée (souvent 720p max sur YouTube).</div>
+
+      <label>Liens (un par ligne)</label>
+      <textarea v-model="dl.urls" rows="3" placeholder="https://www.youtube.com/watch?v=...&#10;https://www.pinterest.com/pin/..."></textarea>
+
+      <div class="row2">
+        <div>
+          <label>Qualité</label>
+          <select v-model="dl.quality">
+            <option value="best">Meilleure disponible</option>
+            <option value="1080">1080p max</option>
+            <option value="720">720p max</option>
+            <option value="480">480p max</option>
+          </select>
+        </div>
+        <div>
+          <label>Dossier de destination</label>
+          <input type="text" v-model="dl.folder" list="dl-folder-list" placeholder="(racine)" :disabled="!hasRoot">
+          <datalist id="dl-folder-list"><option v-for="f in folders" :key="f" :value="f"></option></datalist>
+        </div>
+      </div>
+      <small v-if="hasRoot" class="hint">Les vidéos sont enregistrées dans le dossier ouvert puis ajoutées à la galerie (tag #youtube ou #pinterest, titre en description).</small>
+      <small v-else class="hint">Aucun dossier ouvert en écriture : les vidéos seront enregistrées dans vos Téléchargements. Ouvrez un dossier (Chrome / Edge) pour les ranger directement dans la galerie.</small>
+
+      <div v-if="dl.error" class="err">⚠ {{ dl.error }}</div>
+      <div class="actions">
+        <button @click="dl.open = false">Fermer</button>
+        <button class="primary" :disabled="!dl.urls.trim() || !(dl.server && dl.server.ytdlp)" @click="startDownloads">Télécharger</button>
+      </div>
+
+      <div v-if="dl.jobs.length" class="jobs">
+        <div v-for="j in dl.jobs" :key="j.key" class="job">
+          <div class="top">
+            <span>{{ j.platform === 'pinterest' ? '📌' : '▶️' }}</span>
+            <span class="title" :title="j.url">{{ j.title || j.filename || j.url }}</span>
+            <span class="st" :class="{ok: j.status==='saved', ko: j.status==='error'}">{{ jobLabel(j) }}</span>
+            <button v-if="['saved','error'].includes(j.status)" class="x" title="Retirer" @click="dismissJob(j)">×</button>
+          </div>
+          <div v-if="isRunning(j)" class="bar" :class="{indet: j.progress == null || j.status === 'processing' || j.status === 'queued'}">
+            <div :style="{width: (j.progress || 0) + '%'}"></div>
+          </div>
+          <div v-if="j.error" class="err" style="font-size:12px;margin-top:4px">{{ j.error }}</div>
+        </div>
       </div>
     </div>
   </div>
@@ -1033,6 +1118,140 @@ createApp({
       }
     }
 
+    /* ----- Téléchargeur YouTube / Pinterest (via server.py) ----- */
+    const dl = reactive({
+      open: false, server: null, urls: '', quality: 'best', folder: 'téléchargements',
+      error: '', jobs: [],
+    });
+    const RUNNING = ['sending', 'queued', 'downloading', 'processing', 'importing'];
+    const isRunning = (j) => RUNNING.includes(j.status);
+    const dlActive = computed(() => dl.jobs.filter(isRunning).length);
+    let pollTimer = null;
+
+    function platformOf(url) {
+      let h;
+      try { const u = new URL(url); if (!/^https?:$/.test(u.protocol)) return null; h = u.hostname.toLowerCase(); }
+      catch (e) { return null; }
+      const is = (d) => h === d || h.endsWith('.' + d);
+      if (is('youtube.com') || is('youtu.be') || is('youtube-nocookie.com')) return 'youtube';
+      if (is('pin.it') || /(^|\.)pinterest\.[a-z.]{2,6}$/.test(h)) return 'pinterest';
+      return null;
+    }
+
+    async function checkServer() {
+      try {
+        const r = await fetch('/api/status', { cache: 'no-store' });
+        dl.server = r.ok ? await r.json() : { ok: false };
+      } catch (e) { dl.server = { ok: false }; }
+    }
+
+    function openDl() {
+      dl.open = true; dl.error = '';
+      if (!dl.server || !dl.server.ok || !dl.server.ytdlp) { dl.server = null; checkServer(); }
+    }
+
+    function jobLabel(j) {
+      return {
+        sending: 'Envoi...', queued: 'En attente...',
+        downloading: j.progress != null ? `${Math.round(j.progress)} %` + (j.eta ? ` · ${j.eta}s` : '') : 'Téléchargement...',
+        processing: 'Conversion...', importing: 'Enregistrement...',
+        saved: j.savedPath ? '✓ ' + j.savedPath : '✓ Enregistré', error: 'Échec',
+      }[j.status] || j.status;
+    }
+
+    async function startDownloads() {
+      dl.error = '';
+      const urls = [...new Set(dl.urls.split(/\s+/).map(s => s.trim()).filter(Boolean))];
+      const bad = urls.filter(u => !platformOf(u));
+      if (bad.length) { dl.error = 'Liens non pris en charge (YouTube ou Pinterest uniquement) : ' + bad.join(', '); return; }
+      const folder = normalizeFolder(dl.folder);
+      const problem = validateFolder(folder);
+      if (problem) { dl.error = problem; return; }
+      dl.urls = '';
+      for (const url of urls) {
+        const j = reactive({ key: Math.random().toString(36).slice(2), id: null, url, platform: platformOf(url),
+          status: 'sending', progress: 0, title: '', filename: '', error: '', folder, savedPath: '' });
+        dl.jobs.unshift(j);
+        try {
+          const r = await fetch('/api/download', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, quality: dl.quality }),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.error || 'erreur serveur ' + r.status);
+          Object.assign(j, { id: data.id, status: data.status });
+        } catch (e) {
+          Object.assign(j, { status: 'error', error: e.message === 'Failed to fetch' ? 'serveur local injoignable' : e.message });
+        }
+      }
+      startPolling();
+    }
+
+    function startPolling() {
+      if (pollTimer) return;
+      pollTimer = setInterval(async () => {
+        const pending = dl.jobs.filter(j => j.id && ['queued', 'downloading', 'processing'].includes(j.status));
+        if (!pending.length) { clearInterval(pollTimer); pollTimer = null; return; }
+        for (const j of pending) {
+          try {
+            const r = await fetch('/api/jobs/' + j.id, { cache: 'no-store' });
+            if (!r.ok) throw new Error('téléchargement perdu par le serveur');
+            const d = await r.json();
+            Object.assign(j, { progress: d.progress, eta: d.eta, title: d.title || j.title, filename: d.filename || '' });
+            if (d.status === 'error') Object.assign(j, { status: 'error', error: d.error });
+            else if (d.status === 'done') { j.status = 'importing'; importJob(j); }
+            else j.status = d.status;
+          } catch (e) { Object.assign(j, { status: 'error', error: e.message }); }
+        }
+      }, 1000);
+    }
+
+    // Récupère le fichier terminé et l'ajoute au dossier ouvert + à l'index
+    async function importJob(j) {
+      try {
+        const r = await fetch('/api/jobs/' + j.id + '/file');
+        if (!r.ok) throw new Error('fichier indisponible (' + r.status + ')');
+        const type = typeOf(j.filename) || 'video';
+        const meta = { description: j.title || '', category: '', tags: [j.platform] };
+
+        if (source.root) {
+          const name = await uniqueName(j.folder, j.filename);
+          const dir = await getDirByPath(j.folder, true);
+          const fh = await dir.getFileHandle(name, { create: true });
+          try {
+            await r.body.pipeTo(await fh.createWritable());
+          } catch (e) {
+            try { await dir.removeEntry(name); } catch (e2) { /* ignore */ }
+            throw e;
+          }
+          const f = await fh.getFile();
+          const path = joinPath(j.folder, name);
+          items.value.push({ name, path, type, size: f.size, modified: f.lastModified, mime: f.type, ...meta });
+          j.savedPath = path;
+          await persist(`« ${path} » téléchargé.`);
+        } else {
+          const blob = await r.blob();
+          const file = new File([blob], j.filename, { type: blob.type, lastModified: Date.now() });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob); a.download = j.filename; a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+          if (source.files) {   // dossier en lecture seule : visible dans la galerie pour cette session
+            let path = j.filename, n = 1;
+            while (source.files.has(path)) path = `${baseOf(j.filename)} (${n++})${extOf(j.filename)}`;
+            source.files.set(path, file);
+            items.value.push({ name: path, path, type, size: file.size, modified: file.lastModified, mime: file.type, ...meta });
+          }
+          j.savedPath = 'Téléchargements/' + j.filename;
+        }
+        j.status = 'saved';
+        fetch('/api/jobs/' + j.id, { method: 'DELETE' }).catch(() => {});
+      } catch (e) {
+        Object.assign(j, { status: 'error', error: 'Enregistrement impossible : ' + e.message });
+      }
+    }
+
+    function dismissJob(j) { dl.jobs = dl.jobs.filter(x => x !== j); }
+
     /* ----- Navigation dans la visionneuse ----- */
     // Propose d'enregistrer avant de quitter l'élément courant
     async function guard() {
@@ -1062,6 +1281,10 @@ createApp({
         if (e.key === 'Escape') closeBulk();
         return;
       }
+      if (dl.open) {
+        if (e.key === 'Escape') dl.open = false;
+        return;
+      }
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
       if (viewerIndex.value === null) {
         if (selectMode.value && e.key === 'Escape' && !working.value) toggleSelectMode();
@@ -1080,6 +1303,7 @@ createApp({
       filtered, current, viewerIndex, viewerUrl,
       selectMode, selected, selectedItems, hiddenSelected, selectionTags,
       bulk, bulkTitle,
+      dl, dlActive, isRunning, openDl, startDownloads, jobLabel, dismissJob,
       openFolder, reindex, downloadIndex, onFallback, openAt, close, move,
       addTag, removeTag, onTagKey, save, remove,
       toggleSelectMode, clearSelection, selectAllVisible, onCard,
