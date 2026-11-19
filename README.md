@@ -4,16 +4,38 @@ Galerie locale pour un dossier d'images et de vidéos : index `index.json`, desc
 catégories, tags, renommage / déplacement / suppression, sélection multiple, et
 **téléchargeur de vidéos YouTube et Pinterest**.
 
-## Lancer
+## Version portable (un seul fichier)
+
+Les fichiers prêts à l'emploi sont générés automatiquement par GitHub Actions
+(onglet **Actions** → dernier build → *Artifacts*, ou page **Releases** pour un tag `v*`) :
+
+| Fichier | Usage | Téléchargeur |
+|---|---|---|
+| `DashGallery.exe` (Windows) / `DashGallery` (Linux) | double-clic : lance le serveur et ouvre le navigateur. Python inutile. | ✓ (yt-dlp inclus) |
+| `dashgallery.py` | `python dashgallery.py` (avec `pip install yt-dlp`) | ✓ |
+| `DashGallery.html` | double-clic, aucun serveur | ✗ |
+
+Tout fonctionne **hors ligne** (Vue est intégré), sauf bien sûr le téléchargement de vidéos.
+Pour la meilleure qualité YouTube, posez `ffmpeg.exe` (ou `ffmpeg`) à côté de l'exécutable.
+
+Pour les construire soi-même : `python build.py` → dossier `dist/`
+(puis `pyinstaller --onefile --name DashGallery dist/dashgallery.py` pour l'exécutable).
+
+## Lancer depuis les sources
 
 ```bash
 pip install -r requirements.txt   # yt-dlp
-python server.py                  # puis ouvrir http://localhost:8000
+python server.py                  # ouvre http://localhost:8000
 ```
+
+Au premier lancement connecté, `server.py` enregistre Vue dans `vendor/` : ensuite la
+galerie marche **hors ligne**. Un service worker la garde aussi en cache, donc
+`http://localhost:8000` s'ouvre même sans connexion.
 
 - **Chrome / Edge** recommandés (accès en écriture au dossier via File System Access API).
 - **ffmpeg** recommandé : sans lui, YouTube est limité aux formats déjà fusionnés (souvent 720p).
-- Le serveur n'écoute que sur `127.0.0.1` par défaut (`--host` / `--port` pour changer).
+- Le serveur n'écoute que sur `127.0.0.1` par défaut (`--host`, `--port`, `--no-browser`).
+  Si le port est pris, il essaie le suivant.
 
 Sans le serveur, `index.html` peut toujours être ouvert directement : la galerie marche,
 seul le téléchargeur est indisponible.

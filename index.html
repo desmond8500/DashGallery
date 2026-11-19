@@ -4,7 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Galerie de dossier</title>
-<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<meta name="theme-color" content="#181b22">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<!-- Vue : copie locale (hors ligne), sinon CDN (mis en cache par le service worker) -->
+<script src="vendor/vue.global.prod.js"></script>
+<script>window.Vue || document.write('<script src="https://unpkg.com/vue@3.5.13/dist/vue.global.prod.js"><\/script>')</script>
 <style>
   :root {
     --bg: #0f1115; --panel: #181b22; --line: #2a2f3a;
@@ -156,6 +161,7 @@
   .pill { background: var(--accent); color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11px; margin-left: 4px; }
   .srv { font-size: 12px; padding: 6px 10px; border-radius: 8px; background: #11141a; }
   .srv.ko { color: #ffcb6b; }
+  .offline { color: #ffcb6b; font-size: 12px; border: 1px solid #5a4a22; border-radius: 999px; padding: 2px 10px; }
 
   @media (max-width: 800px) {
     .viewer { flex-direction: column; }
@@ -167,9 +173,14 @@
 </style>
 </head>
 <body>
+<div id="novue" hidden style="padding:40px;text-align:center;color:#ff6b6b;font-family:system-ui">
+  ⚠ Vue.js est introuvable. Connectez-vous une fois à Internet puis lancez <code>python server.py</code>
+  (il enregistre Vue dans <code>vendor/</code>), ou rechargez la page en ligne.
+</div>
 <div id="app">
   <header>
     <h1>📁 Galerie</h1>
+    <span v-if="!online" class="offline" title="Galerie disponible, téléchargeur indisponible">● Hors ligne</span>
     <button class="primary" @click="openFolder">Choisir un dossier</button>
     <button v-if="hasRoot" :disabled="loading || working" @click="reindex">Réindexer</button>
     <button @click="openDl">⬇ Télécharger une vidéo<span v-if="dlActive" class="pill">{{ dlActive }}</span></button>
@@ -288,7 +299,8 @@
     <div class="dialog wide">
       <h2>⬇ Télécharger depuis YouTube ou Pinterest</h2>
 
-      <div v-if="dl.server === null" class="srv">Connexion au serveur local...</div>
+      <div v-if="!online" class="srv ko">⚠ Vous êtes hors ligne : le téléchargement reprendra quand la connexion sera revenue.</div>
+      <div v-else-if="dl.server === null" class="srv">Connexion au serveur local...</div>
       <div v-else-if="!dl.server.ok" class="srv ko">
         ⚠ Serveur local injoignable. Lancez <code>python server.py</code> puis ouvrez
         <code>http://localhost:8000</code> (la galerie ne peut pas télécharger seule depuis un fichier ouvert directement).
@@ -321,7 +333,7 @@
       <div v-if="dl.error" class="err">⚠ {{ dl.error }}</div>
       <div class="actions">
         <button @click="dl.open = false">Fermer</button>
-        <button class="primary" :disabled="!dl.urls.trim() || !(dl.server && dl.server.ytdlp)" @click="startDownloads">Télécharger</button>
+        <button class="primary" :disabled="!online || !dl.urls.trim() || !(dl.server && dl.server.ytdlp)" @click="startDownloads">Télécharger</button>
       </div>
 
       <div v-if="dl.jobs.length" class="jobs">
@@ -396,6 +408,15 @@
 </div>
 
 <script>
+// Service worker : rend la galerie disponible hors ligne (http://localhost uniquement, pas en file://)
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+if (!window.Vue) {
+  document.getElementById('novue').hidden = false;
+  document.getElementById('app').hidden = true;
+  throw new Error('Vue introuvable');
+}
 const { createApp, ref, reactive, computed, watch, onMounted, onBeforeUnmount } = Vue;
 
 /* ---------- Utilitaires ---------- */
@@ -1123,6 +1144,14 @@ createApp({
       open: false, server: null, urls: '', quality: 'best', folder: 'téléchargements',
       error: '', jobs: [],
     });
+    const online = ref(navigator.onLine);
+    const setOnline = () => {
+      const was = online.value;
+      online.value = navigator.onLine;
+      if (online.value && !was && dl.open) { dl.server = null; checkServer(); }
+    };
+    onMounted(() => { window.addEventListener('online', setOnline); window.addEventListener('offline', setOnline); });
+    onBeforeUnmount(() => { window.removeEventListener('online', setOnline); window.removeEventListener('offline', setOnline); });
     const RUNNING = ['sending', 'queued', 'downloading', 'processing', 'importing'];
     const isRunning = (j) => RUNNING.includes(j.status);
     const dlActive = computed(() => dl.jobs.filter(isRunning).length);
@@ -1303,7 +1332,7 @@ createApp({
       filtered, current, viewerIndex, viewerUrl,
       selectMode, selected, selectedItems, hiddenSelected, selectionTags,
       bulk, bulkTitle,
-      dl, dlActive, isRunning, openDl, startDownloads, jobLabel, dismissJob,
+      dl, dlActive, online, isRunning, openDl, startDownloads, jobLabel, dismissJob,
       openFolder, reindex, downloadIndex, onFallback, openAt, close, move,
       addTag, removeTag, onTagKey, save, remove,
       toggleSelectMode, clearSelection, selectAllVisible, onCard,

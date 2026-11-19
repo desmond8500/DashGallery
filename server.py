@@ -13,26 +13,34 @@ Options : --port 8000  --host 127.0.0.1
 ffmpeg est recommandé (fusion vidéo + audio pour la meilleure qualité).
 """
 import argparse
+import base64
 import json
 import mimetypes
 import os
 import re
 import shutil
+import sys
 import tempfile
 import threading
 import time
 import uuid
+import webbrowser
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, urlparse
+from urllib.request import urlopen
 
 try:
     import yt_dlp
 except ImportError:  # le serveur démarre quand même, l'API signale l'absence
     yt_dlp = None
 
-ROOT = Path(__file__).resolve().parent
+# Dossier de l'appli (à côté de l'exécutable en version .exe : on y cherche aussi ffmpeg)
+ROOT = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
+
+# Version portable : build.py remplit ce dictionnaire (chemin -> fichier encodé en base64)
+EMBEDDED = {}  # @@EMBEDDED@@
 WORK = Path(tempfile.gettempdir()) / "dashgallery-downloads"
 JOB_TTL = 3600  # secondes avant nettoyage d'un téléchargement terminé
 
@@ -41,6 +49,11 @@ ALLOWED_HOSTS = (
     "pinterest.com", "pin.it",
 )
 PINTEREST_TLD = re.compile(r"(^|\.)pinterest\.[a-z.]{2,6}$")
+
+VUE_URL = "https://unpkg.com/vue@3.5.13/dist/vue.global.prod.js"
+VUE_FILE = ROOT / "vendor" / "vue.global.prod.js"
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+mimetypes.add_type("image/svg+xml", ".svg")
 
 QUALITIES = {"best": None, "1080": 1080, "720": 720, "480": 480}
 
@@ -64,10 +77,15 @@ def platform_of(url):
     return None
 
 
+def find_ffmpeg():
+    local = ROOT / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    return str(local) if local.exists() else shutil.which("ffmpeg")
+
+
 def format_for(quality):
     h = QUALITIES.get(quality)
     lim = f"[height<={h}]" if h else ""
-    if shutil.which("ffmpeg"):
+    if find_ffmpeg():
         # meilleure vidéo + meilleur audio, fusionnés en mp4
         return (f"bv*{lim}[ext=mp4]+ba[ext=m4a]/bv*{lim}+ba/b{lim}[ext=mp4]/b{lim}/b")
     # sans ffmpeg : uniquement des fichiers déjà complets
@@ -102,6 +120,7 @@ def run_job(job):
         "merge_output_format": "mp4",
         "outtmpl": str(job_dir / "%(title).150B [%(id)s].%(ext)s"),
         "noplaylist": True,
+        "ffmpeg_location": find_ffmpeg(),
         "quiet": True,
         "no_warnings": True,
         "progress_hooks": [hook],
@@ -171,7 +190,7 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/status":
             return self.send_json({"ok": True, "ytdlp": yt_dlp is not None,
                                    "version": getattr(getattr(yt_dlp, "version", None), "__version__", None),
-                                   "ffmpeg": bool(shutil.which("ffmpeg"))})
+                                   "ffmpeg": bool(find_ffmpeg())})
         m = re.fullmatch(r"/api/jobs/([0-9a-f]{32})(/file)?", path)
         if m:
             with jobs_lock:
@@ -184,9 +203,23 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_file(snapshot)
         if path.startswith("/api/"):
             return self.send_json({"error": "introuvable"}, 404)
-        if path in ("/server.py", "/requirements.txt") or "/." in path:
+        if EMBEDDED:
+            return self.send_embedded(path)
+        if path in ("/server.py", "/build.py", "/requirements.txt") or "/." in path or path.startswith("/dist/"):
             return self.send_error(HTTPStatus.NOT_FOUND)
         return super().do_GET()
+
+    def send_embedded(self, path):
+        name = "index.html" if path in ("/", "") else path.lstrip("/")
+        if name not in EMBEDDED:
+            return self.send_error(HTTPStatus.NOT_FOUND)
+        body = base64.b64decode(EMBEDDED[name])
+        self.send_response(200)
+        self.send_header("Content-Type", mimetypes.guess_type(name)[0] or "application/octet-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(body)
 
     def send_file(self, job):
         if job.get("status") != "done" or not os.path.exists(job.get("file", "")):
@@ -247,19 +280,50 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json({"ok": bool(job)})
 
 
+def ensure_vue():
+    """Enregistre une copie locale de Vue pour que la galerie marche hors ligne."""
+    if EMBEDDED or (VUE_FILE.exists() and VUE_FILE.stat().st_size > 10000):
+        return
+    try:
+        with urlopen(VUE_URL, timeout=15) as r:
+            data = r.read()
+        if b"createApp" not in data:
+            raise ValueError("contenu inattendu")
+        VUE_FILE.parent.mkdir(exist_ok=True)
+        tmp = VUE_FILE.with_suffix(".tmp")
+        tmp.write_bytes(data)
+        tmp.replace(VUE_FILE)
+        print(f"✓ Vue enregistré dans {VUE_FILE.relative_to(ROOT)} : la galerie fonctionne maintenant hors ligne")
+    except Exception as e:
+        print(f"⚠ Vue non téléchargé ({e}) : relancez une fois connecté pour l'usage hors ligne")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Serveur local DashGallery")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--no-browser", action="store_true", help="ne pas ouvrir le navigateur")
     args = ap.parse_args()
 
     WORK.mkdir(parents=True, exist_ok=True)
+    ensure_vue()
     threading.Thread(target=cleanup_loop, daemon=True).start()
-    srv = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"DashGallery : http://localhost:{args.port}")
+    srv = None
+    for port in range(args.port, args.port + 20):   # port occupé : on essaie le suivant
+        try:
+            srv = ThreadingHTTPServer((args.host, port), Handler)
+            break
+        except OSError:
+            continue
+    if srv is None:
+        sys.exit(f"Aucun port libre entre {args.port} et {args.port + 19}")
+    url = f"http://localhost:{port}"
+    print(f"DashGallery : {url}   (Ctrl+C pour arrêter)")
+    if not args.no_browser:
+        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
     if yt_dlp is None:
         print("⚠ yt-dlp absent : pip install -r requirements.txt (le téléchargeur sera désactivé)")
-    if not shutil.which("ffmpeg"):
+    if not find_ffmpeg():
         print("⚠ ffmpeg absent : qualité limitée aux fichiers déjà fusionnés (souvent 720p max sur YouTube)")
     try:
         srv.serve_forever()
